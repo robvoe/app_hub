@@ -134,7 +134,7 @@ def term_processes(commandlines: Union[str, List[str]], sigterm_timeout: float =
             commandlines_pids = get_process_pids(commandlines, exclude_process_handles=process_handles)
             process_handles = [handle for handle in process_handles if handle.poll() is None]
         if len(commandlines_pids) or len(process_handles):
-            logger.info(f"SIGTERM timeout after {sigterm_timeout}s. {len(commandlines_pids)+len(process_handles)} processes are still alive")
+            logger.info(f"SIGTERM timed out after {sigterm_timeout}s. {len(commandlines_pids)+len(process_handles)} processes are still alive")
         else:
             logger.info(f"Successfully terminated all processes using SIGTERM (after {round((datetime.now()-started_at).total_seconds(), 1)}s)")
     if len(commandlines_pids) or len(process_handles):
@@ -150,6 +150,7 @@ def term_processes(commandlines: Union[str, List[str]], sigterm_timeout: float =
 
 def run_processes_in_background(run: List[str], run_once: List[str], terminate_and_run: List[str]) -> List:
     """Runs commands as new processes. Returns Popen handles."""
+
     n_processes = len(run + run_once + terminate_and_run)
     if not n_processes:
         logger.info("There are no processes to be run")
@@ -157,18 +158,24 @@ def run_processes_in_background(run: List[str], run_once: List[str], terminate_a
     else:
         logger.info(f"Starting to run {n_processes} process(es)")
     term_processes(terminate_and_run, sigterm_timeout=SIGTERM_TIMEOUT)
-    process_handles = []
+    handles = []
+
+    def Popen(cmd: str) -> None:
+        if "|" not in cmd:
+            handle = subprocess.Popen(shlex.split(cmd), start_new_session=True)
+        else:
+            handle = subprocess.Popen(cmd, start_new_session=True, shell=True)
+        handles.append(handle)
+
     for cmd in run:
-        handle = subprocess.Popen(shlex.split(cmd), start_new_session=True)
-        process_handles.append(handle)
+        Popen(cmd)
     for cmd in run_once + terminate_and_run:
         if len(get_process_pids(cmd)):
             logger.info(f"'{cmd}' already runs. Skipping")
             continue
-        handle = subprocess.Popen(shlex.split(cmd), start_new_session=True)
-        process_handles.append(handle)
-    logger.info(f"Successfully started {len(process_handles)} process(es)")
-    return process_handles
+        Popen(cmd)
+    logger.info(f"Successfully started {len(handles)} process(es)")
+    return handles
 
 
 def __handle_signal(sig, frame):
@@ -186,7 +193,7 @@ def parse_procfile(ini_file_name: str, run: List[str], run_once: List[str], term
         # print(f"Given procfile '{ini_file_name}' does not exist. Exiting now.")
         logger.error(f"Given procfile '{ini_file_name}' does not exist. Exiting now.")
         sys.exit(-1)
-    parser = ConfigParser(delimiters=";:_#", allow_no_value=True)
+    parser = ConfigParser(delimiters="\n", allow_no_value=True)
     parser.read(ini_file_name)
     config = {}
     sections = [(SECTION_RUN, run), (SECTION_RUN_ONCE, run_once), (SECTION_TERMINATE_AND_RUN, terminate_and_run)]
@@ -210,6 +217,8 @@ if __name__ == '__main__':
         print("This script is intended only to be run on Linux. Exiting now.")
         exit(-1)
 
+    print(" ".join(sys.argv))
+
     parser = argparse.ArgumentParser(description="Runs multiple processes and, if desired, terminates them again. "
                                                  "Processes may be long-running applications, as well as complex shell "
                                                  "commands.")
@@ -231,7 +240,7 @@ if __name__ == '__main__':
                         help=f"Default: {DEFAULT_PROCFILE}; .ini file that lists the processes to start. Valid "
                              f"sections are [{SECTION_RUN}], [{SECTION_RUN_ONCE}] and [{SECTION_TERMINATE_AND_RUN}].")
     args = parser.parse_args()
-    # print(args)
+    logger.debug(args)
 
     # Get processes lists
     PROCESSES_RUN = args.run if args.run else []
@@ -242,6 +251,8 @@ if __name__ == '__main__':
     if not args.ignore_procfile:
         parse_procfile(args.procfile, PROCESSES_RUN, PROCESSES_RUN_ONCE, PROCESSES_TERMINATE_AND_RUN)
 
+    logger.debug(f"..\nrun = {PROCESSES_RUN}\nrun_once = {PROCESSES_RUN_ONCE}\nterminate_and_run = {PROCESSES_TERMINATE_AND_RUN}")
+
     # Start our processes
     process_handles = run_processes_in_background(run=PROCESSES_RUN, run_once=PROCESSES_RUN_ONCE, terminate_and_run=PROCESSES_TERMINATE_AND_RUN)
 
@@ -251,10 +262,10 @@ if __name__ == '__main__':
         signal.signal(signal.SIGINT, __handle_signal)
         while not SHUTDOWN_EVENT.isSet():
             SHUTDOWN_EVENT.wait(timeout=1)
-            # From time to time, read the return values of our started applications to prevent Zombie processes
+            # From time to time, read the return values of our started applications to prevent zombie processes
             non_null = [handle.poll() is not None for handle in process_handles]
             if any(non_null):
-                logger.info(f"Released {sum(non_null)} zombie process(es) from suffering.")
+                logger.info(f"{sum(non_null)} process(es) exited..")
                 process_handles = [handle for handle in process_handles if handle.poll() is None]
 
         term_processes(commandlines=PROCESSES_RUN + PROCESSES_RUN_ONCE + PROCESSES_TERMINATE_AND_RUN,
