@@ -1,8 +1,8 @@
 import re
 from typing import Tuple, Optional
 
-_PATTERN_COMMAND_VALIDITY_CHECK = re.compile(r"^(§USER=[a-zA-Z0-9]+§)?[^§]+$", flags=re.IGNORECASE)
-_PATTERN_EXTRACT_USER_AND_COMMAND = re.compile(r"^§USER=([a-zA-Z0-9]+)§([^§]+)$", flags=re.IGNORECASE)
+_PATTERN_COMMAND_VALIDITY_CHECK = re.compile(r"^(§USER=[a-zA-Z0-9_]+§)?[^§]+$", flags=re.IGNORECASE)
+_PATTERN_EXTRACT_USER_AND_COMMAND = re.compile(r"^§USER=([a-zA-Z0-9_]+)§([^§]+)$", flags=re.IGNORECASE)
 
 
 def check_commandline_validity(commandline: str) -> bool:
