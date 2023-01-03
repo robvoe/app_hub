@@ -1,0 +1,7 @@
+name: app_hub
+channels:
+  - defaults
+dependencies:
+  - python=3.9
+  - pytest  # Only for development purposes
+  - psutil
